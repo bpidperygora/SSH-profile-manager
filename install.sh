@@ -69,7 +69,17 @@ install_deps() {
 
   # Best-effort dependency installation for common package managers
   # Needed: openssl, sshpass (optional), fzf (optional)
-  if need_cmd apt-get; then
+  if need_cmd brew; then
+    # macOS (Homebrew)
+    brew update || true
+    brew install openssl fzf || true
+    # sshpass is not in core; try common taps, then ignore if unavailable
+    brew install hudochenkov/sshpass/sshpass || brew install esolitos/ipa/sshpass || true
+  elif need_cmd zypper; then
+    # openSUSE
+    sudo zypper -n refresh || true
+    sudo zypper -n install openssl sshpass fzf || true
+  elif need_cmd apt-get; then
     DEBIAN_FRONTEND=noninteractive sudo apt-get update -y
     DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends \
       openssl sshpass fzf || true
@@ -81,6 +91,11 @@ install_deps() {
     sudo pacman -Sy --noconfirm openssl openssh sshpass fzf || true
   elif need_cmd apk; then
     sudo apk add --no-cache openssl sshpass fzf || true
+  elif need_cmd pkg; then
+    # FreeBSD / Termux both have pkg; names differ minimally
+    # Try a generic set; ignore failures
+    sudo pkg update -f || true
+    sudo pkg install -y openssl sshpass fzf || true
   else
     printf "Package manager not detected. Skipping dependency install.\n"
   fi
@@ -125,6 +140,13 @@ resolve_source() {
 
 main() {
   parse_flags "$@"
+
+  # Adjust default install dir for macOS Apple Silicon if user didn't override
+  if [ "${INSTALL_DIR}" = "/usr/local/bin" ]; then
+    if [ "$(uname -s)" = "Darwin" ] && [ -d "/opt/homebrew/bin" ]; then
+      INSTALL_DIR="/opt/homebrew/bin"
+    fi
+  fi
 
   install_deps
 

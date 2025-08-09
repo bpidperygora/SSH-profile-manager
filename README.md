@@ -2,6 +2,18 @@
 
 Simple CLI to manage and connect to SSH profiles.
 
+### Supported platforms
+
+- macOS (Homebrew)
+- Debian/Ubuntu (apt)
+- RHEL/CentOS/Fedora (yum/dnf)
+- Arch (pacman)
+- Alpine (apk)
+- openSUSE (zypper)
+- FreeBSD / Termux (pkg)
+
+Installer auto-detects the package manager and attempts to install dependencies.
+
 ### Quick install (curl | bash)
 
 ```bash
@@ -14,6 +26,13 @@ Alternative (explicit script URL):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/install.sh \
   | SOURCE_URL=https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/ssh-connect bash -s -- --bin-dir=/usr/local/bin --name=ssh-connect
+```
+
+macOS Apple Silicon (default bin dir is `/opt/homebrew/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/install.sh \
+  | GITHUB_REPO=bpidperygora/SSH-profile-manager bash -s -- --bin-dir=/opt/homebrew/bin --name=ssh-connect
 ```
 
 ### Uninstall
@@ -47,8 +66,17 @@ ssh-connect help [command]    # show help
 ### Dependencies
 
 - Required: openssl
-- Optional: sshpass (password auth auto-login), fzf (nice selector)
-- Installer attempts to install these via detected package manager. Disable with `NO_DEPS=1`.
+- Optional: sshpass (password auth auto-login), fzf (nicer selector)
+- On macOS, `sshpass` може вимагати сторонні taps; інсталер спробує і пропустить, якщо недоступний.
+- Вимкнути авто-встановлення залежностей: `NO_DEPS=1`.
+
+```bash
+NO_DEPS=1 ./install.sh --bin-dir=/usr/local/bin --name=ssh-connect
+```
+
+### Privacy / .gitignore
+
+- Папки `profiles/`, `exports/`, файли `*.profile`, архіви `*.tar.gz` ігноруються та не потрапляють у git.
 
 ### Troubleshooting
 
