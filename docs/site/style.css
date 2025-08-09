@@ -1,0 +1,138 @@
+* {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, system-ui, Segoe UI, Roboto, Ubuntu, Cantarell,
+      Noto Sans, Helvetica, Arial, sans-serif;
+    color: #e6edf3;
+    background: #0b0f17; /* dark graphite */
+    line-height: 1.6;
+  }
+  
+  .container {
+    max-width: 1024px;
+    margin: 0 auto;
+    padding: 28px 20px;
+  }
+  
+  .site-header {
+    background: #0b0f17;
+    color: #e6edf3;
+    border-bottom: 1px solid #1b2638;
+  }
+  .site-header h1 {
+    margin: 0 0 10px 0;
+    font-size: 34px;
+  }
+  .site-header .container {
+    padding-top: 28px;
+    padding-bottom: 20px;
+  }
+  
+  .site-header p{
+      margin-bottom: 10px;
+  }
+  .tagline {
+    margin: 0;
+    opacity: 0.85;
+  }
+  
+  .btn {
+    display: inline-block;
+    padding: 10px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    border: 1px solid #2a3b55;
+    color: #e6edf3;
+    margin-right: 8px;
+    transition: all 0.15s ease;
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+    border-color: #5b759a;
+  }
+  .btn.primary {
+    background: #2ea3f2;
+    color: #0b0f17;
+    border-color: #2ea3f2;
+  }
+  
+  section {
+    margin-top: 28px;
+  }
+  h2 {
+    margin: 0 0 12px 0;
+    font-size: 20px;
+    color: #f1f5f9;
+  }
+  
+  /* compact code cards with sticky control bar */
+  .code {
+    background: #121a2b; /* deep indigo surface */
+    color: #e5ecf3;
+    border-radius: 10px;
+    border: 1px solid #263247;
+    margin: 12px 0;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  }
+  .code-controls {
+    position: sticky;
+    top: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    height: 0px;
+  }
+  .code-body {
+    overflow: auto; /* both axes */
+    padding: 10px 12px 12px 12px;
+  }
+  .code-pre { margin: 0; min-width: max-content; }
+  pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 13px; line-height: 1.5; }
+  
+  /* custom scrollbar for code */
+  .code-body::-webkit-scrollbar { height: 10px; width: 10px; }
+  .code-body::-webkit-scrollbar-track { background: #0f1422; border-radius: 999px; }
+  .code-body::-webkit-scrollbar-thumb { background: #2a3b55; border-radius: 999px; }
+  .code-body::-webkit-scrollbar-thumb:hover { background: #3a5476; }
+  
+  /* copy icon button in the sticky bar */
+  .copy-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 0;
+    line-height: 0;
+    border-radius: 8px;
+    border: 1px solid #2ea3f2;
+    background-color: #2ea3f2;
+    color: transparent;
+    cursor: pointer;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="12" height="12" rx="2" stroke="white" stroke-width="2"/><rect x="3" y="3" width="12" height="12" rx="2" stroke="white" stroke-width="2"/></svg>');
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 16px 16px;
+    position: relative;
+    top: 15px;
+    right: 1px;
+  }
+  .copy-btn:hover { filter: brightness(1.05); }
+  .copy-btn.copied { border-color: #16a34a; background-color: #16a34a; }
+  
+  /* labels above code blocks */
+  .label-row { margin: 6px 0 6px; }
+  .label { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 12px; color: #cbd5e1; background: #172238; border: 1px solid #2a3b55; }
+  
+  .grid { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+  figure { margin: 0; }
+  figure img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid #263247; }
+  figure figcaption { text-align: center; color: #a7b0c0; margin-top: 8px; font-size: 14px; }
+  
+  .links { padding-left: 16px; }
+  .links li { margin-bottom: 6px; }
+  
+  .site-footer { border-top: 1px solid #1b2638; margin-top: 32px; color: #a7b0c0; }
+  

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ssh-connect — SSH profile manager CLI</title>
+    <meta name="description"
+        content="Manage and connect SSH profiles from CLI. Encrypted passwords, fzf picker, sshpass auto-login, export to tar.gz.">
+    <link rel="canonical" href="https://bpidperygora.github.io/SSH-profile-manager/site/">
+    <meta name="robots" content="index, follow">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="ssh-connect — SSH profile manager CLI">
+    <meta property="og:description"
+        content="Manage and connect SSH profiles from CLI. Encrypted passwords, fzf picker, sshpass auto-login, export to tar.gz.">
+    <meta property="og:url" content="https://bpidperygora.github.io/SSH-profile-manager/site/">
+    <meta property="og:image"
+        content="https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/docs/use.gif">
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ssh-connect — SSH profile manager CLI">
+    <meta name="twitter:description"
+        content="Manage and connect SSH profiles from CLI. Encrypted passwords, fzf picker, sshpass auto-login, export to tar.gz.">
+    <meta name="twitter:image"
+        content="https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/docs/use.gif">
+
+    <!-- JSON-LD -->
+    <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ssh-connect",
+    "operatingSystem": "Linux, macOS",
+    "applicationCategory": "DeveloperApplication",
+    "description": "Manage and connect SSH profiles from CLI. Encrypted passwords, fzf picker, sshpass auto-login, export to tar.gz.",
+    "license": "https://opensource.org/licenses/MIT",
+    "url": "https://bpidperygora.github.io/SSH-profile-manager/site/",
+    "downloadUrl": "https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/ssh-connect",
+    "softwareVersion": "v0.1.0",
+    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+  }
+  </script>
+
+    <link rel="stylesheet" href="./style.css">
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="container">
+            <h1>ssh-connect</h1>
+            <p class="tagline">Manage SSH profiles from CLI — encrypted passwords, fzf picker, sshpass auto-login.</p>
+            <div class="cta">
+                <a class="btn primary" href="https://github.com/bpidperygora/SSH-profile-manager"
+                    rel="noopener noreferrer">GitHub</a>
+                <a class="btn" href="https://buymeacoffee.com/bpidperygoa" rel="noopener noreferrer">Buy Me a Coffee</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <section>
+            <h2>Features</h2>
+            <ul>
+                <li>Encrypted passwords (OpenSSL AES-256-CBC + PBKDF2) with master passphrase</li>
+                <li>Interactive profile picker via fzf (optional)</li>
+                <li>sshpass auto-login for password auth (optional)</li>
+                <li>Export/import profiles to tar.gz</li>
+                <li>One-file install, no vendor lock-in</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Demo</h2>
+            <div class="grid">
+                <figure>
+                    <img src="../create.gif" alt="Create SSH profile demo">
+                    <figcaption>Create a profile</figcaption>
+                </figure>
+                <figure>
+                    <img src="../use.gif" alt="Connect with profile demo">
+                    <figcaption>Connect with a profile</figcaption>
+                </figure>
+            </div>
+        </section>
+        <section>
+            <h2>Install</h2>
+            <p>Default install location: <code>/usr/local/bin</code> (Linux, macOS Intel) /
+                <code>/opt/homebrew/bin</code> (macOS Apple Silicon). Override with <code>--bin-dir</code>.</p>
+
+            <div class="label-row"><span class="label">Linux/macOS (Intel)</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="install-linux">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre class="code-pre"><code id="install-linux">curl -fsSL https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/install.sh \
+    | GITHUB_REPO=bpidperygora/SSH-profile-manager bash -s -- --bin-dir=/usr/local/bin --name=ssh-connect</code></pre>
+                </div>
+            </div>
+
+            <div class="label-row"><span class="label">macOS (Apple Silicon)</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="install-macos-arm">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre
+                        class="code-pre"><code id="install-macos-arm">curl -fsSL https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/install.sh \
+    | GITHUB_REPO=bpidperygora/SSH-profile-manager bash -s -- --bin-dir=/opt/homebrew/bin --name=ssh-connect</code></pre>
+                </div>
+            </div>
+
+            <div class="label-row"><span class="label">Direct script URL</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="install-direct">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre
+                        class="code-pre"><code id="install-direct">curl -fsSL https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/install.sh \
+    | SOURCE_URL=https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/ssh-connect bash -s -- --bin-dir=/usr/local/bin --name=ssh-connect</code></pre>
+                </div>
+            </div>
+
+            <div class="label-row"><span class="label">Git + Make</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="install-git">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre class="code-pre"><code id="install-git">git clone https://github.com/bpidperygora/SSH-profile-manager.git
+  cd SSH-profile-manager
+  make install</code></pre>
+                </div>
+            </div>
+
+            <p>Dependencies: required <code>openssl</code>; optional <code>sshpass</code> (auto-login), <code>fzf</code>
+                (picker). Installer attempts to install them; disable with:</p>
+            <div class="label-row"><span class="label">No dependency install</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="no-deps">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre
+                        class="code-pre"><code id="no-deps">NO_DEPS=1 ./install.sh --bin-dir=/usr/local/bin --name=ssh-connect</code></pre>
+                </div>
+            </div>
+
+            <h3>Uninstall</h3>
+            <div class="label-row"><span class="label">Remove binary</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="uninstall">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre class="code-pre"><code id="uninstall">curl -fsSL https://raw.githubusercontent.com/bpidperygora/SSH-profile-manager/main/uninstall.sh \
+    | bash -s -- --bin-dir=/usr/local/bin --name=ssh-connect</code></pre>
+                </div>
+            </div>
+
+            <h3>Verify</h3>
+            <div class="label-row"><span class="label">Check install</span></div>
+            <div class="code">
+                <div class="code-controls">
+                    <button class="copy-btn" data-copy="verify">Copy</button>
+                </div>
+                <div class="code-body">
+                    <pre class="code-pre"><code id="verify">ssh-connect help
+  which ssh-connect</code></pre>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Usage</h2>
+            <div class="code">
+                <div class="code-controls"></div>
+                <div class="code-body">
+                    <pre class="code-pre"><code id="usage">ssh-connect                   # interactive selector and connect
+ssh-connect &lt;name&gt;            # connect to profile by name
+ssh-connect create            # create a new profile
+ssh-connect update [&lt;name&gt;]   # update existing profile
+ssh-connect delete [&lt;name&gt;]   # delete profile
+ssh-connect export            # export profiles to tar.gz
+ssh-connect list              # list profile names
+ssh-connect help [command]    # show help</code></pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>MIT Licensed. © <span id="year"></span> ssh-connect</p>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('year').textContent = new Date().getFullYear();
+        const buttons = document.querySelectorAll('.copy-btn');
+        buttons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-copy');
+                const code = document.getElementById(id);
+                if (!code) return;
+                const text = code.textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                    btn.classList.add('copied');
+                    setTimeout(() => { btn.classList.remove('copied'); }, 900);
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>
