@@ -17,6 +17,24 @@ warn() { color "33" "$*"; }
 err()  { color "31" "$*" 1>&2; }
 debug() { if [[ "${SSH_CONNECT_DEBUG:-0}" == "1" ]]; then printf "DEBUG: %s\n" "$*" 1>&2; fi; }
 
+# Compat: mapfile may be missing on older Bash (e.g., macOS Bash 3.2)
+readarray_compat() {
+  # Usage: readarray_compat VAR_NAME  (reads from stdin)
+  local __name="$1"
+  if type mapfile >/dev/null 2>&1; then
+    # shellcheck disable=SC2034
+    mapfile -t "$__name"
+  else
+    local __line
+    local __arr=()
+    while IFS= read -r __line; do
+      __arr+=("$__line")
+    done
+    # shellcheck disable=SC2034
+    eval "$__name=(\"${__arr[@]}\")"
+  fi
+}
+
 # Resolve base directory: honor SSH_CONNECT_HOME if set; else force default to $HOME/ssh_profile
 resolve_ssh_connect_home() {
   if [[ -n "${SSH_CONNECT_HOME:-}" ]]; then
@@ -88,7 +106,7 @@ list_profiles() {
 # Interactive profile chooser used by commands that operate on a single profile
 choose_profile_interactive() {
   local profiles name
-  mapfile -t profiles < <(list_profiles)
+  readarray_compat profiles < <(list_profiles)
   if (( ${#profiles[@]} == 0 )); then
     warn "No profiles found. Create one: ssh-connect create"
     return 1
@@ -272,8 +290,10 @@ discover_private_keys() {
   local ssh_dir
   ssh_dir="$HOME/.ssh"
   if [[ -d "$ssh_dir" ]]; then
-    # Show only regular files that look like private keys, hide large binary files
-    find "$ssh_dir" -maxdepth 1 -type f ! -name "*.pub" -printf "%f\n" | sort || true
+    # Cross-platform: avoid GNU find -printf; use -print0 and basename
+    find "$ssh_dir" -maxdepth 1 -type f ! -name "*.pub" -print0 2>/dev/null \
+      | while IFS= read -r -d '' path; do basename "$path"; done \
+      | sort || true
   else
     return 0
   fi
@@ -321,7 +341,7 @@ cmd_create() {
 
   if [[ "$auth" == "key" ]]; then
     local keys
-    mapfile -t keys < <(discover_private_keys)
+    readarray_compat keys < <(discover_private_keys)
     local key_choice
     if (( ${#keys[@]} > 0 )); then
       key_choice="$(choose_from_list "Select SSH key in ~/.ssh" "${keys[@]}" || true)"
@@ -506,7 +526,7 @@ connect_profile() {
 
 select_and_connect() {
   local profiles
-  mapfile -t profiles < <(list_profiles)
+  readarray_compat profiles < <(list_profiles)
   if (( ${#profiles[@]} == 0 )); then
     warn "No profiles found. Create one: ssh-connect create"
     exit 0
@@ -533,12 +553,12 @@ cmd_export() {
   local out_name
   out_name="ssh_profiles_export_$(date +%Y%m%d_%H%M%S)"
   local tmp_dir
-  tmp_dir="$(mktemp -d)"
+  tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t ssh_profiles_export)"
   local export_root="$tmp_dir/$out_name"
   mkdir -p "$export_root/profiles"
 
   local profiles
-  mapfile -t profiles < <(list_profiles)
+  readarray_compat profiles < <(list_profiles)
   if (( ${#profiles[@]} == 0 )); then
     warn "No profiles to export"
     rm -rf "$tmp_dir"
