@@ -1,0 +1,19 @@
+# Local data directories
+profiles/
+exports/
+
+# Profile files anywhere
+*.profile
+
+# Archives
+*.tar.gz
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+
+# Env files
+.env
+
+

@@ -1,0 +1,794 @@
+#!/usr/bin/env bash
+
+# Strict mode for safer bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# Base directory for profiles and exports (defaults to user's home)
+SSH_CONNECT_HOME_DEFAULT="$HOME/ssh_profile"
+SSH_CONNECT_HOME="${SSH_CONNECT_HOME:-$SSH_CONNECT_HOME_DEFAULT}"
+PROFILES_DIR="$SSH_CONNECT_HOME/profiles"
+EXPORTS_DIR="$SSH_CONNECT_HOME/exports"
+
+# Util: colored output
+color() { local c="$1"; shift; printf "\033[%sm%s\033[0m\n" "$c" "$*"; }
+info() { color "36" "$*"; }
+warn() { color "33" "$*"; }
+err()  { color "31" "$*" 1>&2; }
+debug() { if [[ "${SSH_CONNECT_DEBUG:-0}" == "1" ]]; then printf "DEBUG: %s\n" "$*" 1>&2; fi; }
+
+# Resolve base directory: honor SSH_CONNECT_HOME if set; else force default to $HOME/ssh_profile
+resolve_ssh_connect_home() {
+  if [[ -n "${SSH_CONNECT_HOME:-}" ]]; then
+    return 0
+  fi
+  SSH_CONNECT_HOME="$SSH_CONNECT_HOME_DEFAULT"
+}
+
+mask_secret() {
+  # Show first 2 and last 2 characters; middle becomes *****. If too short, return *****.
+  local s="$1"
+  local n=${#s}
+  if (( n <= 4 )); then
+    printf '*****'
+    return 0
+  fi
+  local prefix="${s:0:2}"
+  local suffix="${s: -2}"
+  printf '%s*****%s' "$prefix" "$suffix"
+}
+
+# Capability checks
+has_fzf() { command -v fzf >/dev/null 2>&1; }
+
+# Bracketed-paste handling helpers
+disable_bracketed_paste() { [[ -t 0 ]] && printf '\e[?2004l' >/dev/tty || true; }
+enable_bracketed_paste()  { [[ -t 0 ]] && printf '\e[?2004h' >/dev/tty || true; }
+sanitize_paste_markers() { sed -e $'s/\x1b\[200~//g' -e $'s/\x1b\[201~//g'; }
+trim_crlf() {
+  tr -d '\r\n'
+}
+
+# Ensure required directories exist
+init_dirs() {
+  resolve_ssh_connect_home
+  PROFILES_DIR="$SSH_CONNECT_HOME/profiles"
+  EXPORTS_DIR="$SSH_CONNECT_HOME/exports"
+  debug "resolved SSH_CONNECT_HOME=$SSH_CONNECT_HOME"
+  debug "using PROFILES_DIR=$PROFILES_DIR"
+  mkdir -p "$PROFILES_DIR" "$EXPORTS_DIR"
+  # One-time migration from legacy XDG location if destination is empty
+  local legacy_profiles_dir="$HOME/.local/share/ssh_profile/profiles"
+  if [[ -z "$(ls -A "$PROFILES_DIR" 2>/dev/null || true)" ]] \
+     && compgen -G "$legacy_profiles_dir/*.profile" >/dev/null 2>&1; then
+    mv "$legacy_profiles_dir"/*.profile "$PROFILES_DIR"/
+    info "Migrated profiles from $legacy_profiles_dir to $PROFILES_DIR"
+  fi
+}
+
+# Validate profile name (safe filename)
+is_valid_name() {
+  local name="$1"
+  [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]
+}
+
+profile_path() {
+  local name="$1"
+  echo "$PROFILES_DIR/$name.profile"
+}
+
+list_profiles() {
+  shopt -s nullglob
+  local files=("$PROFILES_DIR"/*.profile)
+  for f in "${files[@]}"; do
+    basename "${f%.profile}"
+  done
+}
+
+# Interactive profile chooser used by commands that operate on a single profile
+choose_profile_interactive() {
+  local profiles name
+  mapfile -t profiles < <(list_profiles)
+  if (( ${#profiles[@]} == 0 )); then
+    warn "No profiles found. Create one: ssh-connect create"
+    return 1
+  fi
+  if (( ${#profiles[@]} == 1 )); then
+    echo "${profiles[0]}"
+    return 0
+  fi
+  name="$(choose_from_list "Select profile" "${profiles[@]}" || true)"
+  [[ -n "${name:-}" ]] || return 1
+  echo "$name"
+}
+
+# Read key=value file into environment variables with prefix P_
+load_profile() {
+  local name="$1"
+  local file
+  file="$(profile_path "$name")"
+  [[ -f "$file" ]] || { err "Profile not found: $name"; return 1; }
+  # Clear previous P_ vars
+  local var
+  for var in $(compgen -v | grep '^P_'); do unset "$var"; done
+  while IFS= read -r line; do
+    [[ -z "${line:-}" ]] && continue
+    [[ "$line" =~ ^# ]] && continue
+    [[ "$line" =~ ^[A-Z_]+= ]] || continue
+    local k v
+    k="${line%%=*}"
+    v="${line#*=}"
+    # shellcheck disable=SC2163
+    export "P_${k}"="${v}"
+  done < "$file"
+}
+
+save_profile() {
+  local name="$1"; shift
+  local kv_pairs=("$@")
+  local file
+  file="$(profile_path "$name")"
+  {
+    echo "NAME=$name"
+    local kv
+    for kv in "${kv_pairs[@]}"; do
+      echo "$kv"
+    done
+  } > "$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+prompt() {
+  local message="$1"
+  local default_value="${2:-}"
+  local input
+  disable_bracketed_paste
+  if [[ -n "$default_value" ]]; then
+    read -r -p "$message [$default_value]: " input || true
+    echo "${input:-$default_value}"
+  else
+    read -r -p "$message: " input || true
+    echo "$input"
+  fi
+  enable_bracketed_paste
+}
+
+prompt_secret() {
+  local message="$1"
+  local input
+  disable_bracketed_paste
+  if [[ -t 0 ]]; then
+    read -r -s -p "$message: " input || true
+    echo
+  else
+    read -r -p "$message: " input || true
+  fi
+  # Sanitize bracketed-paste markers and trim CR/LF
+  input="$(printf '%s' "$input" | sanitize_paste_markers | trim_crlf)"
+  enable_bracketed_paste
+  echo "$input"
+}
+
+get_master_passphrase() {
+  local message="$1"
+  if [[ -n "${SSH_CONNECT_PASSPHRASE:-}" ]]; then
+    printf '%s' "$SSH_CONNECT_PASSPHRASE"
+    return 0
+  fi
+  prompt_secret "$message"
+}
+
+choose_from_list() {
+  # Args: title, array_items...
+  local title="$1"; shift
+  local items=("$@")
+
+  # Preferred: fzf (arrow keys navigation)
+  if has_fzf && (( ${#items[@]} > 0 )); then
+    local selection
+    selection="$(printf '%s\n' "${items[@]}" | fzf --prompt "$title: " --height 15 --border --reverse --no-multi || true)"
+    if [[ -n "${selection:-}" ]]; then
+      echo "$selection"
+      return 0
+    else
+      return 1
+    fi
+  fi
+
+  # Fallback: numbered list
+  local idx=1
+  echo "$title" >&2
+  for it in "${items[@]}"; do
+    printf "%2d) %s\n" "$idx" "$it" >&2
+    idx=$((idx+1))
+  done
+  local choice
+  while true; do
+    read -r -p "Choose [1-${#items[@]}] or q: " choice || true
+    [[ "$choice" == "q" ]] && return 1
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice>=1 && choice<=${#items[@]} )); then
+      echo "${items[$((choice-1))]}"
+      return 0
+    else
+      printf "Invalid selection.\n" >&2
+    fi
+  done
+}
+
+choose_auth_type() {
+  local sel
+  sel="$(choose_from_list "Auth type" "key" "password" || true)"
+  if [[ "$sel" == "key" || "$sel" == "password" ]]; then
+    echo "$sel"
+    return 0
+  fi
+  return 1
+}
+
+# Map legacy numeric values to strings and sanitize input
+normalize_auth_type() {
+  local raw="${1:-key}"
+  case "$raw" in
+    1|"1"|key|"key") echo "key" ;;
+    2|"2"|password|"password") echo "password" ;;
+    *) echo "key" ;;
+  esac
+}
+
+# Choose auth type but bias the current as first option
+choose_auth_type_with_default() {
+  local current="$(normalize_auth_type "${1:-key}")"
+  if [[ "$current" == "password" ]]; then
+    choose_from_list "Auth type" "password" "key" || true
+  else
+    choose_from_list "Auth type" "key" "password" || true
+  fi
+}
+
+encrypt_password() {
+  local plaintext="$1"
+  local passphrase="$2"
+  # OpenSSL AES-256-CBC with PBKDF2, base64 output
+  # -A disables line wrapping to keep base64 on a single line in profiles
+  printf '%s' "$plaintext" | openssl enc -aes-256-cbc -pbkdf2 -salt -a -A -pass pass:"$passphrase"
+}
+
+decrypt_password() {
+  local ciphertext_b64="$1"
+  local passphrase="$2"
+  # Guard: if no ciphertext, bail to avoid OpenSSL 'error reading input file'
+  if [[ -z "${ciphertext_b64:-}" ]]; then
+    return 1
+  fi
+  # Stream base64 to OpenSSL; remove CRs, keep a trailing newline (OpenSSL reads until EOF)
+  if [[ "${SSH_CONNECT_DEBUG:-0}" == "1" ]]; then
+    printf '%s\n' "$ciphertext_b64" | tr -d '\r' | openssl enc -d -aes-256-cbc -pbkdf2 -a -pass pass:"$passphrase"
+  else
+    printf '%s\n' "$ciphertext_b64" | tr -d '\r' | openssl enc -d -aes-256-cbc -pbkdf2 -a -pass pass:"$passphrase" 2>/dev/null
+  fi
+}
+
+discover_private_keys() {
+  local ssh_dir
+  ssh_dir="$HOME/.ssh"
+  if [[ -d "$ssh_dir" ]]; then
+    # Show only regular files that look like private keys, hide large binary files
+    find "$ssh_dir" -maxdepth 1 -type f ! -name "*.pub" -printf "%f\n" | sort || true
+  else
+    return 0
+  fi
+}
+
+cmd_create() {
+  local first_arg="${1:-}"
+  if [[ "${first_arg}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for create
+    return 0
+  fi
+  local name
+  while true; do
+    name="$(prompt "Profile name (letters, digits, . _ -)" )"
+    [[ -n "$name" ]] || { warn "Name required"; continue; }
+    is_valid_name "$name" || { warn "Invalid name"; continue; }
+    local p
+    p="$(profile_path "$name")"
+    [[ -e "$p" ]] && { warn "Profile exists"; continue; }
+    break
+  done
+
+  # First: choose authentication method using numeric 1/2 selector
+  local auth
+  auth="$(choose_auth_type || true)"
+  if [[ -z "${auth:-}" ]]; then
+    info "Canceled"
+    exit 0
+  fi
+
+  local host user port
+  host="$(prompt "Host" )"
+  while [[ -z "${host:-}" ]]; do
+    warn "Host required"
+    host="$(prompt "Host" )"
+  done
+  user="$(prompt "User" "$USER" )"
+  port="$(prompt "Port" 22 )"
+
+  local kv=()
+  kv+=("HOST=$host")
+  kv+=("USER=$user")
+  kv+=("PORT=$port")
+  kv+=("AUTH_TYPE=$auth")
+
+  if [[ "$auth" == "key" ]]; then
+    local keys
+    mapfile -t keys < <(discover_private_keys)
+    local key_choice
+    if (( ${#keys[@]} > 0 )); then
+      key_choice="$(choose_from_list "Select SSH key in ~/.ssh" "${keys[@]}" || true)"
+    fi
+    if [[ -z "${key_choice:-}" ]]; then
+      key_choice="$(prompt "Enter path to private key" "$HOME/.ssh/id_rsa")"
+    else
+      key_choice="$HOME/.ssh/$key_choice"
+    fi
+    # Validate key path exists
+    if [[ ! -f "$key_choice" ]]; then
+      warn "Key not found: $key_choice"
+    fi
+    kv+=("KEY_PATH=$key_choice")
+  else
+    local pw passphrase enc
+    pw="$(prompt_secret "Password")"
+    while [[ -z "$pw" ]]; do warn "Password required"; pw="$(prompt_secret "Password")"; done
+    passphrase="$(get_master_passphrase "Master passphrase for encryption")"
+    while [[ -z "$passphrase" ]]; do warn "Passphrase required"; passphrase="$(get_master_passphrase "Master passphrase for encryption")"; done
+    enc="$(encrypt_password "$pw" "$passphrase")"
+    kv+=("PASSWORD_ENC=$enc")
+  fi
+
+  save_profile "$name" "${kv[@]}"
+  info "Created profile '$name'"
+}
+
+cmd_update() {
+  local name="$1"
+  if [[ -z "${name:-}" ]] && [[ "${2:-}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for update
+    return 0
+  fi
+  if [[ "${name:-}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for update
+    return 0
+  fi
+  if [[ -z "${name:-}" ]]; then
+    name="$(choose_profile_interactive || true)"
+    if [[ -z "${name:-}" ]]; then
+      info "Canceled"
+      exit 0
+    fi
+  fi
+  load_profile "$name"
+  local host user port auth key_path password_enc
+  host="$(prompt "Host" "${P_HOST:-}" )"
+  while [[ -z "${host:-}" ]]; do
+    warn "Host required"
+    host="$(prompt "Host" "${P_HOST:-}" )"
+  done
+  user="$(prompt "User" "${P_USER:-}" )"
+  port="$(prompt "Port" "${P_PORT:-22}" )"
+  auth="$(choose_auth_type_with_default "${P_AUTH_TYPE:-key}")"
+  auth="$(normalize_auth_type "$auth")"
+  local kv=("HOST=$host" "USER=$user" "PORT=$port" "AUTH_TYPE=$auth")
+  if [[ "$auth" == "key" ]]; then
+    key_path="$(prompt "Key path" "${P_KEY_PATH:-$HOME/.ssh/id_rsa}")"
+    if [[ ! -f "$key_path" ]]; then
+      warn "Key not found: $key_path"
+    fi
+    kv+=("KEY_PATH=$key_path")
+  else
+    local change_pw
+    local force_pw_init="N"
+    # Force password entry if switching from key->password or password not yet set
+    if [[ "${P_AUTH_TYPE:-}" != "password" || -z "${P_PASSWORD_ENC:-}" ]]; then
+      force_pw_init="Y"
+    fi
+    if [[ "$force_pw_init" == "Y" ]]; then
+      change_pw="Y"
+    else
+      change_pw="$(prompt "Change password? (y/N)" "N")"
+    fi
+    if [[ "$change_pw" =~ ^[Yy]$ ]]; then
+      local pw passphrase enc
+      pw="$(prompt_secret "New password")"
+      while [[ -z "$pw" ]]; do warn "Password required"; pw="$(prompt_secret "New password")"; done
+      passphrase="$(get_master_passphrase "Master passphrase for encryption")"
+      while [[ -z "$passphrase" ]]; do warn "Passphrase required"; passphrase="$(get_master_passphrase "Master passphrase for encryption")"; done
+      enc="$(encrypt_password "$pw" "$passphrase")"
+      kv+=("PASSWORD_ENC=$enc")
+    else
+      kv+=("PASSWORD_ENC=${P_PASSWORD_ENC:-}")
+    fi
+  fi
+  save_profile "$name" "${kv[@]}"
+  info "Updated profile '$name'"
+}
+
+cmd_delete() {
+  local name="$1"
+  if [[ -z "${name:-}" ]] && [[ "${2:-}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for delete
+    return 0
+  fi
+  if [[ "${name:-}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for delete
+    return 0
+  fi
+  if [[ -z "${name:-}" ]]; then
+    name="$(choose_profile_interactive || true)"
+    if [[ -z "${name:-}" ]]; then
+      info "Canceled"
+      exit 0
+    fi
+  fi
+  local file
+  file="$(profile_path "$name")"
+  [[ -f "$file" ]] || { err "Profile not found: $name"; exit 1; }
+  read -r -p "Delete '$name'? (y/N): " yn || true
+  if [[ "$yn" =~ ^[Yy]$ ]]; then
+    rm -f "$file"
+    info "Deleted profile '$name'"
+  else
+    info "Canceled"
+  fi
+}
+
+need_sshpass() {
+  command -v sshpass >/dev/null 2>&1
+}
+
+connect_profile() {
+  local name="$1"
+  load_profile "$name"
+  local host user port auth key_path
+  host="${P_HOST:-}"
+  user="${P_USER:-}"
+  port="${P_PORT:-22}"
+  auth="${P_AUTH_TYPE:-key}"
+  key_path="${P_KEY_PATH:-}"
+
+  [[ -n "$host" && -n "$user" ]] || { err "Profile incomplete"; exit 1; }
+
+  if [[ "$auth" == "key" ]]; then
+    if [[ -n "$key_path" ]]; then
+      exec ssh -p "$port" -i "$key_path" "$user@$host"
+    else
+      exec ssh -p "$port" "$user@$host"
+    fi
+  else
+    if need_sshpass; then
+      local passphrase password
+      if [[ -z "${P_PASSWORD_ENC:-}" ]]; then
+        warn "No stored password. Run: ssh-connect update $name"
+        exec ssh -p "$port" "$user@$host"
+      fi
+      passphrase="$(get_master_passphrase "Master passphrase to decrypt password")"
+      if [[ "${SSH_CONNECT_TRACE:-0}" == "1" ]]; then debug "connect name=$name enc_len=${#P_PASSWORD_ENC}"; fi
+      password="$(decrypt_password "${P_PASSWORD_ENC:-}" "$passphrase" || true)"
+      if [[ "${SSH_CONNECT_TRACE:-0}" == "1" ]]; then debug "connect name=$name dec_len_before_trim=${#password}"; fi
+      # Trim any accidental CR/LF around the decrypted password
+      password="$(printf '%s' "$password" | trim_crlf)"
+      if [[ "${SSH_CONNECT_TRACE:-0}" == "1" ]]; then debug "connect name=$name dec_len_after_trim=${#password}"; fi
+      if [[ "${SSH_CONNECT_DEBUG_PASSWORD:-0}" == "1" ]]; then
+        local masked
+        masked="$(mask_secret "$password")"
+        debug "DECRYPTED_PASSWORD='$masked'"
+      fi
+      if [[ -z "${password:-}" ]]; then
+        warn "Decryption failed. Falling back to manual password."
+        exec ssh -p "$port" "$user@$host"
+      fi
+      if [[ "${SSH_CONNECT_DEBUG:-0}" == "1" ]]; then
+        if [[ "${SSH_CONNECT_DEBUG_PASSWORD:-0}" == "1" ]]; then
+          local masked_pw
+          masked_pw="$(mask_secret "$password")"
+          debug "exec: sshpass -p '$masked_pw' ssh -o StrictHostKeyChecking=accept-new -p '$port' '$user@$host'"
+        else
+          debug "exec: sshpass -p '<hidden>' ssh -o StrictHostKeyChecking=accept-new -p '$port' '$user@$host'"
+        fi
+      fi
+      exec sshpass -p "$password" ssh -o StrictHostKeyChecking=accept-new -p "$port" "$user@$host"
+    else
+      warn "sshpass not installed. Connecting without auto password."
+      exec ssh -p "$port" "$user@$host"
+    fi
+  fi
+}
+
+select_and_connect() {
+  local profiles
+  mapfile -t profiles < <(list_profiles)
+  if (( ${#profiles[@]} == 0 )); then
+    warn "No profiles found. Create one: ssh-connect create"
+    exit 0
+  fi
+  if (( ${#profiles[@]} == 1 )); then
+    connect_profile "${profiles[0]}"
+    return
+  fi
+  local name
+  name="$(choose_from_list "Select profile" "${profiles[@]}" || true)"
+  if [[ -z "${name:-}" ]]; then
+    info "Canceled"
+    exit 0
+  fi
+  connect_profile "$name"
+}
+
+cmd_export() {
+  local first_arg="${1:-}"
+  if [[ "${first_arg}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for export
+    return 0
+  fi
+  local out_name
+  out_name="ssh_profiles_export_$(date +%Y%m%d_%H%M%S)"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local export_root="$tmp_dir/$out_name"
+  mkdir -p "$export_root/profiles"
+
+  local profiles
+  mapfile -t profiles < <(list_profiles)
+  if (( ${#profiles[@]} == 0 )); then
+    warn "No profiles to export"
+    rm -rf "$tmp_dir"
+    exit 0
+  fi
+
+  local passphrase
+  passphrase="$(get_master_passphrase "Master passphrase to DECRYPT stored passwords for export")"
+  if [[ "${SSH_CONNECT_TRACE:-0}" == "1" ]]; then debug "export passphrase_len=${#passphrase}"; fi
+
+  local name file auth dec
+  for name in "${profiles[@]}"; do
+    load_profile "$name"
+    auth="${P_AUTH_TYPE:-key}"
+    local enc_for_len="${P_PASSWORD_ENC-}"
+    if [[ "${SSH_CONNECT_TRACE:-0}" == "1" ]]; then debug "export name=$name auth=$auth enc_len=${#enc_for_len}"; fi
+    if [[ "$auth" == "password" ]]; then
+      dec="$(decrypt_password "${P_PASSWORD_ENC:-}" "$passphrase" || true)"
+      # Trim CR/LF from decrypted value before writing
+      dec="$(printf '%s' "$dec" | trim_crlf)"
+      local dec_for_len="${dec-}"
+      if [[ "${SSH_CONNECT_TRACE:-0}" == "1" ]]; then debug "export name=$name dec_len=${#dec_for_len}"; fi
+    else
+      dec=""
+    fi
+    file="$export_root/profiles/$name.profile"
+    {
+      echo "NAME=$name"
+      echo "HOST=${P_HOST:-}"
+      echo "USER=${P_USER:-}"
+      echo "PORT=${P_PORT:-22}"
+      echo "AUTH_TYPE=${P_AUTH_TYPE:-key}"
+      if [[ "$auth" == "key" ]]; then
+        echo "KEY_PATH=${P_KEY_PATH:-}"
+      else
+        echo "PASSWORD=$dec"
+      fi
+    } > "$file"
+  done
+
+  local archive="$EXPORTS_DIR/$out_name.tar.gz"
+  (cd "$tmp_dir" && tar -czf "$archive" "$out_name")
+  rm -rf "$tmp_dir"
+  info "Exported to $archive"
+}
+
+print_help_for() {
+  local cmd="$1"
+  case "$cmd" in
+    create)
+      cat <<'EOF'
+Usage:
+  ssh-connect create [--help]
+
+Description:
+  Create a new profile interactively. You will be prompted for:
+    - Profile name (safe filename)
+    - Authentication type (key/password)
+    - Host, User, Port
+    - If key: path to private key (defaults to ~/.ssh/id_rsa)
+    - If password: password (stored encrypted with a master passphrase)
+
+Options:
+  -h, --help, help  Show this help and exit
+EOF
+      ;;
+    update)
+      cat <<'EOF'
+Usage:
+  ssh-connect update [<name>] [--help]
+
+Description:
+  Update fields of an existing profile. Prompts with current values as defaults.
+  If profile uses password auth, you may choose to re-encrypt with a new password.
+  If <name> is omitted, you can select a profile interactively.
+
+Options:
+  -h, --help, help  Show this help and exit
+EOF
+      ;;
+    delete)
+      cat <<'EOF'
+Usage:
+  ssh-connect delete [<name>] [--help]
+
+Description:
+  Delete a profile after a confirmation prompt. If <name> is omitted,
+  you can select a profile interactively.
+
+Options:
+  -h, --help, help  Show this help and exit
+EOF
+      ;;
+    export)
+      cat <<'EOF'
+Usage:
+  ssh-connect export [--help]
+
+Description:
+  Export all profiles into a tar.gz archive under $SSH_CONNECT_HOME/exports.
+  If a profile uses password auth, you will be asked for the master passphrase
+  to DECRYPT its password for inclusion as plaintext in the exported file.
+
+Options:
+  -h, --help, help  Show this help and exit
+EOF
+      ;;
+    list)
+      cat <<'EOF'
+Usage:
+  ssh-connect list [--help]
+
+Description:
+  List all available profile names stored under $SSH_CONNECT_HOME/profiles.
+
+Options:
+  -h, --help, help  Show this help and exit
+EOF
+      ;;
+    connect)
+      cat <<'EOF'
+Usage:
+  ssh-connect                # interactive selector and connect
+  ssh-connect <name>         # connect directly to the named profile
+
+Description:
+  Connect to a host using a stored profile. For password auth, if sshpass is
+  installed you will be prompted for the master passphrase to decrypt the
+  stored password, then auto-login is performed. Otherwise, falls back to
+  standard ssh behavior.
+
+Options:
+  -h, --help, help  Show general help
+EOF
+      ;;
+    *)
+      print_help
+      ;;
+  esac
+}
+
+print_help() {
+  cat <<EOF
+ssh-connect - Manage and connect to SSH profiles
+
+Usage:
+  ssh-connect                   # interactive profile selector and connect
+  ssh-connect <name>            # connect to profile by name
+  ssh-connect create            # create a new profile
+  ssh-connect update [<name>]   # update an existing profile (interactive if omitted)
+  ssh-connect delete [<name>]   # delete a profile (interactive if omitted)
+  ssh-connect export            # export all profiles with DECRYPTED passwords (tar.gz)
+  ssh-connect list              # list profiles
+  ssh-connect help [command]    # show detailed help (global or for a command)
+
+Commands:
+  create    Create a new SSH profile interactively
+  update    Update fields of an existing profile
+  delete    Delete a profile file after confirmation
+  export    Export all profiles (plaintext passwords if any) to a tar.gz
+  list      List available profiles
+  help      Show global or per-command help
+
+Global Options:
+  -h, --help, help     Show this help screen
+   -v, --verbose        Verbose debug output (masked password only)
+
+Environment:
+  SSH_CONNECT_HOME  Base directory (default: $SSH_CONNECT_HOME_DEFAULT)
+EOF
+}
+
+cmd_list() {
+  local first_arg="${1:-}"
+  if [[ "${first_arg}" =~ ^(-h|--help|help)$ ]]; then
+    print_help_for list
+    return 0
+  fi
+  local profiles
+  mapfile -t profiles < <(list_profiles)
+  if (( ${#profiles[@]} == 0 )); then
+    echo "(no profiles)"
+  else
+    printf "%s\n" "${profiles[@]}"
+  fi
+}
+
+main() {
+  init_dirs
+  # Global flags
+  while [[ "${1:-}" =~ ^- ]]; do
+    case "${1:-}" in
+      -v|--verbose)
+        export SSH_CONNECT_DEBUG=1
+        export SSH_CONNECT_DEBUG_PASSWORD=1
+        shift || true
+        ;;
+      -h|--help)
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  local cmd="${1:-}"
+  case "${cmd:-}" in
+    -h|--help|help)
+      shift || true
+      if [[ -n "${1:-}" ]]; then
+        print_help_for "$1"
+      else
+        print_help
+      fi
+      ;;
+    create)
+      shift || true
+      cmd_create "$@"
+      ;;
+    update)
+      shift || true
+      cmd_update "${1:-}"
+      ;;
+    delete)
+      shift || true
+      cmd_delete "${1:-}"
+      ;;
+    export)
+      shift || true
+      cmd_export "$@"
+      ;;
+    list)
+      shift || true
+      cmd_list "$@"
+      ;;
+    "")
+      select_and_connect
+      ;;
+    *)
+      if is_valid_name "$cmd" && [[ -f "$(profile_path "$cmd")" ]]; then
+        connect_profile "$cmd"
+      else
+        err "Unknown command or profile: $cmd"
+        print_help
+        exit 1
+      fi
+      ;;
+  esac
+}
+
+main "$@"
+
+
